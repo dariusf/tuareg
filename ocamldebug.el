@@ -60,7 +60,7 @@
 (defvar ocamldebug-delete-output)
 (defvar ocamldebug-complete-list)
 
-(defvar ocamldebug-prompt-pattern "^(\\(ocd\\|cdb\\)) *"
+(defvar ocamldebug-prompt-pattern "^(\\(ocd\\|cdb\\) [0-9]+) *"
   "A regexp to recognize the prompt for ocamldebug.")
 
 (defvar ocamldebug-overlay-event nil
@@ -138,6 +138,7 @@ C-x SPACE sets break point at current line."
   (set (make-local-variable 'paragraph-start) comint-prompt-regexp)
   (set (make-local-variable 'ocamldebug-last-frame-displayed-p) t)
   (set (make-local-variable 'shell-dirtrackp) t)
+  (add-hook 'comint-input-filter-functions 'ocamldebug-navlog-kill-server)
   (add-hook 'comint-input-filter-functions 'shell-directory-tracker nil t))
 
 ;;; Keymaps.
@@ -477,10 +478,12 @@ the ocamldebug commands `cd DIR' and `directory'."
     (message "Current directory is %s" default-directory)
     (setq ocamldebug-command-name
           (read-from-minibuffer "OCaml debugger to run: "
-                                ocamldebug-command-name))
+                                "/Users/darius/ocaml/ocaml/debugger/ocamldebug"))
+                                ; ocamldebug-command-name))
     (setq ocamldebug-debugee-args
           (read-from-minibuffer "Arguments to the debuggee: "
                                 ocamldebug-debugee-args))
+    (ocamldebug-navlog path (split-string ocamldebug-debugee-args))
     (apply #'make-comint
            (append (list
                     (concat "ocamldebug-" file)
@@ -498,49 +501,193 @@ the ocamldebug commands `cd DIR' and `directory'."
 ;;;###autoload
 (defalias 'camldebug 'ocamldebug)
 
+(defvar ocamldebug-kill-server-timer)
+
+(defun ocamldebug-wait-for-ocamldebug-death ()
+    ; (print "waiting...")
+  (when (not (get-buffer-process ocamldebug-current-buffer))
+    ; (print "done")
+    (cancel-timer ocamldebug-kill-server-timer))
+    (delete-process debugger-server-process)
+  )
+
+(defun ocamldebug-navlog-kill-server (data)
+
+  (let ((input (ocamldebug-chomp data)))
+
+  (when (or (string= "q" input) (string= "qu" input) (string= "qui" input) (string= "quit" input))
+
+    (setq ocamldebug-kill-server-timer
+          (run-at-time "1 sec" 0.3 #'ocamldebug-wait-for-ocamldebug-death))
+
+    )))
+
 (defun ocamldebug-navlog-goto (button)
-  (print button)
-  (print (button-get button 'time))
+  ;; (print button)
+  ;; (print (button-get button 'time))
   (ocamldebug-goto (button-get button 'time)))
 
-(defun ocamldebug-buttonize-all (results)
+; (defun ocamldebug-buttonize-all (results)
+;   (dolist (elt results)
+;     (let ((time (car elt))
+;           (start (car (cdr elt)))
+;           (length (car (cdr (cdr elt))))
+;           )
+;       (button-put (make-button start (+ 1 start length) 'action 'ocamldebug-navlog-goto 'follow-link t) 'time time))))
+
+; (defun ocamldebug-find-all-occurrences (str)
+;   (setq results (list))
+;   (setq last 0)
+;   (setq temp (string-match ":time \\([0-9]+\\)" str last))
+;   (while temp
+;     (setq last temp)
+;     (push (list (string-to-int (match-string 1 str)) last (length (match-string 0 str)))
+;           results)
+;     (setq temp
+;           (string-match ":time \\([0-9]+\\)" str (+ last 1))))
+;   results)
+
+(defun ocamldebug-buttonize (results)
   (dolist (elt results)
-    (let ((time (car elt))
-          (start (car (cdr elt)))
-          (length (car (cdr (cdr elt))))
+    (let ((start (nth 0 elt))
+          (end (nth 1 elt))
+          (time (nth 2 elt))
           )
-      (button-put (make-button start (+ 1 start length) 'mouse-action 'ocamldebug-navlog-goto 'action 'ocamldebug-navlog-goto) 'time time))))
 
-(defun ocamldebug-find-all-occurrences (str)
-  (setq results (list))
-  (setq last 0)
-  (setq temp (string-match ":time \\([0-9]+\\)" str last))
-  (while temp
-    (setq last temp)
-    (push (list (string-to-int (match-string 1 str)) last (length (match-string 0 str)))
-          results)
-    (setq temp
-          (string-match ":time \\([0-9]+\\)" str (+ last 1))))
-  results)
+      (button-put (make-button start (+ 1 start (- end start)) 'action 'ocamldebug-navlog-goto 'follow-link t) 'time time))))
 
-(defun ocamldebug-navlog-on-process-end (process event)
+(defun ocamldebug-unescape (str)
+  "Unescapes STR, converting escaped OCaml sequences into literals"
+  (replace-regexp-in-string "\\\\\"" "\"" (replace-regexp-in-string "\\\\n" "\n" str)))
+
+(defun ocamldebug-navlog-on-process-end (str)
   (with-current-buffer "*ocamldebug-navlog*"
-    (ocamldebug-buttonize-all (ocamldebug-find-all-occurrences (buffer-string)))))
 
-;;;###autoload
-(defun ocamldebug-navlog (path)
+
+    (setq saved-point (point))
+
+    (erase-buffer)
+
+    ; (insert str)
+    ; (ocamldebug-buttonize-all (ocamldebug-find-all-occurrences (buffer-string)))
+
+    (let ((form (read str)))
+
+    (if (symbolp form)
+
+      (insert str)
+
+    (let* (
+      (struct (eval form))
+      (text (ocamldebug-unescape (car struct)))
+    )
+
+
+      (insert text)
+
+      (ocamldebug-buttonize (nth 1 struct))
+
+      (set-window-point nil saved-point)
+      (recenter)
+
+
+
+
+    )
+      )
+)
+    ))
+
+(defun ocamldebug-chomp (str)
+  "Chomp leading and tailing whitespace from STR."
+  (replace-regexp-in-string "[ \t\n]+$" "" (replace-regexp-in-string "^[ \t\n]+" "" str)))
+
+(defvar ocamldebug-navlog-polling-buffer "")
+
+(defun ocamldebug-navlog-filter (proc string)
+  (when (buffer-live-p (process-buffer proc))
+    (with-current-buffer (process-buffer proc)
+
+      (setq ocamldebug-navlog-polling-buffer
+            (concat ocamldebug-navlog-polling-buffer string))
+
+      (let* ((header "===header===\n")
+             (footer "\n===footer===")
+             (header-pos
+              (string-match header ocamldebug-navlog-polling-buffer))
+             (footer-pos
+              (string-match footer ocamldebug-navlog-polling-buffer
+                            (+ 1 (if header-pos header-pos 0)))))
+
+        (when (and header-pos footer-pos)
+          (ocamldebug-navlog-on-process-end
+           (substring ocamldebug-navlog-polling-buffer
+                      (+ (length header) header-pos)
+                      footer-pos))
+          (setq ocamldebug-navlog-polling-buffer
+                (substring ocamldebug-navlog-polling-buffer footer-pos)))
+
+          ; (print (length ocamldebug-navlog-polling-buffer))
+        )
+
+
+      ;; thing to scan and split by header and footer
+      ; (if (not ocamldebug-navlog-polling-buffer)
+      ;                                   ; buffer is empty
+      ;                                   ; split by header, take first element
+      ;     (progn (setq chunk (car (last (split-string string "===header==="))))
+      ;            (setq footer-inside (string-match "===footer===" chunk))
+      ;            (if (not footer-inside)
+      ;                                   ; push into buffer
+      ;                (setq ocamldebug-navlog-polling-buffer (cons chunk ocamldebug-navlog-polling-buffer))
+      ;                                   ; split by footer, take first element, output
+      ;              (setq remaining (car (split-string chunk "===footer===")))
+      ;              (ocamldebug-navlog-on-process-end remaining)))
+      ;                                   ; buffer is not empty
+      ;   (setq footer-inside (string-match "===footer===" string))
+      ;   (if (not footer-inside)
+      ;                                   ; footer not inside. append entire thing to buffer
+      ;       (setq ocamldebug-navlog-polling-buffer (cons string ocamldebug-navlog-polling-buffer))
+      ;                                   ; footer inside. split by footer, take first, output along with rest of buffer, reset buffer
+      ;     (setq foot (car (split-string string "===footer===")))
+      ;     (setq ocamldebug-navlog-polling-buffer (cons foot ocamldebug-navlog-polling-buffer))
+      ;     (setq everything (mapconcat 'identity (reverse ocamldebug-navlog-polling-buffer) ""))
+      ;     (setq ocamldebug-navlog-polling-buffer ())
+      ;     (ocamldebug-navlog-on-process-end everything)))
+
+  ;; very simple algo for chomping and splitting by header only
+      ; (setq string2 (ocamldebug-chomp (last (split-string string "===header==="))))
+      ;; (setq string2 (car (last (split-string string "===header==="))))
+      ;; (ocamldebug-navlog-on-process-end string2)
+
+
+
+
+
+      )))
+
+(defvar debugger-server-process)
+
+(defun ocamldebug-navlog (debuggee args)
   "Provides an alternative means of navigating time in the debugger."
-  (interactive "fBytecode executable to run: ")
 
-  (setq nav-window (split-window-right))
+  (setq nav-window (split-window-horizontally))
   (get-buffer-create "*ocamldebug-navlog*")
   (set-window-buffer nav-window "*ocamldebug-navlog*")
-  (setq debugger-process
-        (start-process "/Users/darius/ocaml/ocaml/boot/ocamlrun"
-                       "*ocamldebug-navlog*" "/Users/darius/ocaml/ocaml/debugger/ocamldebug"
-                       "/Users/darius/ocaml/debug/a.out"
-                       "a" "b" "c"))
-  (set-process-sentinel debugger-process 'ocamldebug-navlog-on-process-end))
+
+  (setq debugger-server-process
+    (start-process "ocamldebug-navlog"
+                             "*ocamldebug-navlog*" "/Users/darius/ocaml/system/navlog-server"))
+
+    ; TODO the name arg was wrong, thought it was first program but no
+    ; (apply 'start-process
+    ;   (append (list
+    ;                          debuggee)
+    ;                    args)))
+
+  ; (set-process-sentinel debugger-server-process 'ocamldebug-navlog-on-process-end)
+  (set-process-filter debugger-server-process 'ocamldebug-navlog-filter)
+  )
 
   ; (setq path (expand-file-name path))
   ; (let (commands '("/Users/darius/ocaml/ocaml/boot/ocamlrun" "/Users/darius/ocaml/ocaml/debugger/ocamldebug" path "&"))
@@ -820,5 +967,4 @@ representation is simply concatenated with the COMMAND."
 
 
 (provide 'ocamldebug)
-(provide 'ocamldebug-navlog)
 ;;; ocamldebug.el ends here
