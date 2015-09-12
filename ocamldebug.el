@@ -498,6 +498,54 @@ the ocamldebug commands `cd DIR' and `directory'."
 ;;;###autoload
 (defalias 'camldebug 'ocamldebug)
 
+(defun ocamldebug-navlog-goto (button)
+  (print button)
+  (print (button-get button 'time))
+  (ocamldebug-goto (button-get button 'time)))
+
+(defun ocamldebug-buttonize-all (results)
+  (dolist (elt results)
+    (let ((time (car elt))
+          (start (car (cdr elt)))
+          (length (car (cdr (cdr elt))))
+          )
+      (button-put (make-button start (+ 1 start length) 'mouse-action 'ocamldebug-navlog-goto 'action 'ocamldebug-navlog-goto) 'time time))))
+
+(defun ocamldebug-find-all-occurrences (str)
+  (setq results (list))
+  (setq last 0)
+  (setq temp (string-match ":time \\([0-9]+\\)" str last))
+  (while temp
+    (setq last temp)
+    (push (list (string-to-int (match-string 1 str)) last (length (match-string 0 str)))
+          results)
+    (setq temp
+          (string-match ":time \\([0-9]+\\)" str (+ last 1))))
+  results)
+
+(defun ocamldebug-navlog-on-process-end (process event)
+  (with-current-buffer "*ocamldebug-navlog*"
+    (ocamldebug-buttonize-all (ocamldebug-find-all-occurrences (buffer-string)))))
+
+;;;###autoload
+(defun ocamldebug-navlog (path)
+  "Provides an alternative means of navigating time in the debugger."
+  (interactive "fBytecode executable to run: ")
+
+  (setq nav-window (split-window-right))
+  (get-buffer-create "*ocamldebug-navlog*")
+  (set-window-buffer nav-window "*ocamldebug-navlog*")
+  (setq debugger-process
+        (start-process "/Users/darius/ocaml/ocaml/boot/ocamlrun"
+                       "*ocamldebug-navlog*" "/Users/darius/ocaml/ocaml/debugger/ocamldebug"
+                       "/Users/darius/ocaml/debug/a.out"
+                       "a" "b" "c"))
+  (set-process-sentinel debugger-process 'ocamldebug-navlog-on-process-end))
+
+  ; (setq path (expand-file-name path))
+  ; (let (commands '("/Users/darius/ocaml/ocaml/boot/ocamlrun" "/Users/darius/ocaml/ocaml/debugger/ocamldebug" path "&"))
+  ;   (shell-command (mapconcat 'identity commands " "))))
+
 (defun ocamldebug-set-buffer ()
   (if (eq major-mode 'ocamldebug-mode)
       (setq ocamldebug-current-buffer (current-buffer))
@@ -772,4 +820,5 @@ representation is simply concatenated with the COMMAND."
 
 
 (provide 'ocamldebug)
+(provide 'ocamldebug-navlog)
 ;;; ocamldebug.el ends here
