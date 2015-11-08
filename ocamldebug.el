@@ -560,43 +560,53 @@ the ocamldebug commands `cd DIR' and `directory'."
   "Unescapes STR, converting escaped OCaml sequences into literals"
   (replace-regexp-in-string "\\\\\"" "\"" (replace-regexp-in-string "\\\\n" "\n" str)))
 
+(defmacro ocamldebug-for-each-window-of-buffer (buffer-name &rest body)
+  "Execute forms in BODY with all windows displaying BUFFER-NAME temporarily
+current."
+  `(mapc (lambda (win)
+          ;; (unless (eq (selected-window) win)
+            (with-selected-window win
+              ,@body
+              ;; (action)
+              ;; (goto-char 10)
+              ;; (goto-char (point-min))
+              ;; (forward-line (1- line))
+              ))
+        ;; )
+        (get-buffer-window-list ,buffer-name nil t)))
+
+;; (defmacro with-current-buffer (buffer-or-name &rest body)
+;;   "Execute the forms in BODY with BUFFER-OR-NAME temporarily current.
+;; BUFFER-OR-NAME must be a buffer or the name of an existing buffer.
+;; The value returned is the value of the last form in BODY.  See
+;; also `with-temp-buffer'."
+;;   (declare (indent 1) (debug t))
+;;   `(save-current-buffer
+;;      (set-buffer ,buffer-or-name)
+;;      ,@body))
+
 (defun ocamldebug-navlog-on-process-end (str)
-  (with-current-buffer "*ocamldebug-navlog*"
-
-
-    (setq saved-point (point))
-
-    (erase-buffer)
-
-    ; (insert str)
-    ; (ocamldebug-buttonize-all (ocamldebug-find-all-occurrences (buffer-string)))
-
-    (let ((form (read str)))
-
-    (if (symbolp form)
-
-      (insert str)
-
-    (let* (
-      (struct (eval form))
-      (text (ocamldebug-unescape (car struct)))
-    )
-
-
-      (insert text)
-
-      (ocamldebug-buttonize (nth 1 struct))
-
-      (set-window-point nil saved-point)
-      (recenter)
-
-
-
-
-    )
-      )
-)
-    ))
+  "Called when all process input arrives (in STR)."
+  (let* ((form (read str))
+         (buffer-name "*ocamldebug-navlog*")
+         (saved-points ()))
+    ;; Save points in all windows
+    (ocamldebug-for-each-window-of-buffer buffer-name
+                                          (push (point) saved-points))
+    (setq saved-points (reverse saved-points))
+    ;; Modify the buffer
+    (with-current-buffer buffer-name
+      (erase-buffer)
+      (if (symbolp form)
+          (insert str)
+        (let* ((struct (eval form))
+               (text (ocamldebug-unescape (car struct))))
+          (insert text)
+          (ocamldebug-buttonize (nth 1 struct)))))
+    ;; Restore points in all windows
+    (ocamldebug-for-each-window-of-buffer buffer-name
+                                          (set-window-point nil (pop saved-points))
+                                          (recenter))))
 
 (defun ocamldebug-chomp (str)
   "Chomp leading and tailing whitespace from STR."
