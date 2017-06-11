@@ -194,6 +194,7 @@ representation is simply concatenated with the COMMAND."
 (def-ocamldebug "down"  ">" "Go down N stack frames (numeric arg) with display")
 (def-ocamldebug "break"  "\C-b"	"Set breakpoint at current line."
   "@ \"%m\" # %c")
+(def-ocamldebug "end"	"\C-e"	"Step to the end of the program")
 
 (defun ocamldebug-kill-filter (string)
   ;gob up stupid questions :-)
@@ -454,7 +455,9 @@ around point."
       (setq ocamldebug-complete-list nil))
     (setq ocamldebug-complete-list
 	  (sort ocamldebug-complete-list 'string-lessp))
-    (comint-dynamic-simple-complete command-word ocamldebug-complete-list)))
+    (comint-dynamic-simple-complete command-word ocamldebug-complete-list)
+    ; (comint-dynamic-simple-complete command-word '("end"))
+    ))
 
 (define-key tuareg-mode-map "\C-x " 'ocamldebug-break)
 
